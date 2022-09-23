@@ -2,11 +2,31 @@ import sys
 
 from django.db import transaction
 
+from django.core.management import get_commands, load_command_class
 from django.core.management.commands.migrate import Command as MigrateCommand
 from django.db.migrations.recorder import MigrationRecorder
 
 from django_tenants.signals import schema_migrated, schema_migrate_message
 from django_tenants.utils import get_public_schema_name, get_tenant_database_alias
+
+
+def load_base_migrate_command():
+    """
+    Load a custom migrate command currently used in the project.
+
+    This is taken from the django.core.management.call_command function.
+    It enables us to respect the Django command loading logic,
+    and automatically pick a custom migrate command other than Django's.
+    """
+    from django_tenants.management.commands.migrate_schemas import MigrateSchemasCommand
+
+    command_name = 'migrate'
+    app_name = get_commands()[command_name]
+    command_class = load_command_class(app_name, command_name)
+    if isinstance(command_class, MigrateSchemasCommand):
+        # The custom command is ours -> return the one from Django
+        command_class = MigrateCommand
+    return command_class
 
 
 def run_migrations(args, options, executor_codename, schema_name, tenant_type='',
@@ -50,7 +70,8 @@ def run_migrations(args, options, executor_codename, schema_name, tenant_type=''
     stderr.style_func = style_func
     if int(options.get('verbosity', 1)) >= 1:
         stdout.write(style.NOTICE("=== Starting migration"))
-    MigrateCommand(stdout=stdout, stderr=stderr).execute(*args, **options)
+    migrate_command_class = load_base_migrate_command()
+    migrate_command_class(stdout=stdout, stderr=stderr).execute(*args, **options)
 
     try:
         transaction.commit()
